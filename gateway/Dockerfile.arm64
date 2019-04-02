@@ -1,7 +1,10 @@
-FROM golang:1.10.4 as build
-WORKDIR /go/src/github.com/openfaas/faas/gateway
+FROM alpine:3.9 as qemu_extract
+COPY --from=multiarch/qemu-user-static:x86_64-aarch64 /usr/bin qemu_user_static.tgz
+RUN tar -xzvf qemu_user_static.tgz
 
-#RUN curl -sL https://github.com/alexellis/license-check/releases/download/0.1/license-check > /usr/bin/license-check && chmod +x /usr/bin/license-check
+FROM arm64v8/golang:1.11-alpine as golang
+COPY --from=qemu_extract qemu-* /usr/bin
+WORKDIR /go/src/github.com/openfaas/faas/gateway
 
 COPY vendor         vendor
 
@@ -17,11 +20,10 @@ COPY version        version
 COPY scaling        scaling
 COPY server.go      .
 
-# Run a gofmt and exclude all vendored code.
-#RUN license-check -path ./ --verbose=false \
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o gateway .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -a -installsuffix cgo -o gateway .
 
-FROM alpine:3.8
+FROM arm64v8/alpine:3.9
+COPY --from=qemu_extract qemu-* /usr/bin
 
 RUN addgroup -S app \
     && adduser -S -g app app
@@ -32,9 +34,7 @@ EXPOSE 8080
 ENV http_proxy      ""
 ENV https_proxy     ""
 
-
-
-COPY --from=build /go/src/github.com/openfaas/faas/gateway/gateway    .
+COPY --from=golang /go/src/github.com/openfaas/faas/gateway/gateway    .
 COPY assets     assets
 
 RUN chown -R app:app ./
